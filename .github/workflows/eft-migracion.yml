@@ -132,22 +132,44 @@ jobs:
           echo "No hay instancia disponible en SSM" >&2; exit 1
 
       - name: Ejecutar init.sql contra RDS (vía SSM)
+        env:
+          RDS_HOST: ${{ steps.tf-out.outputs.rds_endpoint }}
+          DB_PASS: ${{ steps.tf-out.outputs.db_pass }}
+          INSTANCE_ID: ${{ steps.instance.outputs.id }}
         run: |
+          # init.sql viaja embebido en base64: no depende de que el repo
+          # sea público ni de conectividad de la instancia hacia GitHub.
+          B64=$(base64 -w0 app/tienda-vehiculos-db/init.sql)
+
+          jq -n --arg b64 "$B64" --arg host "$RDS_HOST" --arg pass "$DB_PASS" \
+            '{commands: [
+              "command -v mysql >/dev/null || dnf install -y mariadb105",
+              ("echo " + $b64 + " | base64 -d > /tmp/init.sql"),
+              ("mysql -h " + $host + " -u admin -p" + $pass + " < /tmp/init.sql"),
+              ("mysql -h " + $host + " -u admin -p" + $pass + " -e \"USE tienda_vehiculos; SELECT COUNT(*) AS vehiculos FROM vehiculos;\"")
+            ]}' > /tmp/ssm-params.json
+
           CMD_ID=$(aws ssm send-command \
-            --instance-ids "${{ steps.instance.outputs.id }}" \
+            --instance-ids "$INSTANCE_ID" \
             --document-name "AWS-RunShellScript" \
             --comment "EFT: poblar tienda_vehiculos en RDS" \
-            --parameters commands="[
-              \"curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/app/tienda-vehiculos-db/init.sql -o /tmp/init.sql\",
-              \"mysql -h ${{ steps.tf-out.outputs.rds_endpoint }} -u admin -p'${{ steps.tf-out.outputs.db_pass }}' < /tmp/init.sql\",
-              \"mysql -h ${{ steps.tf-out.outputs.rds_endpoint }} -u admin -p'${{ steps.tf-out.outputs.db_pass }}' -e 'USE tienda_vehiculos; SELECT COUNT(*) AS vehiculos FROM vehiculos;'\"
-            ]" \
+            --parameters file:///tmp/ssm-params.json \
             --query 'Command.CommandId' --output text)
+
+          # No abortar en el wait: primero recuperar stdout/stderr remotos
           aws ssm wait command-executed --command-id "$CMD_ID" \
-            --instance-id "${{ steps.instance.outputs.id }}"
+            --instance-id "$INSTANCE_ID" || true
+
+          STATUS=$(aws ssm get-command-invocation --command-id "$CMD_ID" \
+            --instance-id "$INSTANCE_ID" --query 'Status' --output text)
+          echo "── stdout remoto ──"
           aws ssm get-command-invocation --command-id "$CMD_ID" \
-            --instance-id "${{ steps.instance.outputs.id }}" \
-            --query 'StandardOutputContent' --output text
+            --instance-id "$INSTANCE_ID" --query 'StandardOutputContent' --output text
+          echo "── stderr remoto ──"
+          aws ssm get-command-invocation --command-id "$CMD_ID" \
+            --instance-id "$INSTANCE_ID" --query 'StandardErrorContent' --output text
+          echo "Estado final: $STATUS"
+          [ "$STATUS" = "Success" ]
 
       - name: Resumen
         run: |
