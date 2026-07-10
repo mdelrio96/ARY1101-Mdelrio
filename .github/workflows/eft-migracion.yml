@@ -1,0 +1,161 @@
+# ─────────────────────────────────────────────────────────────
+# EFT ARY1101 · Migración Automóvil Tech a AWS vía IaC propia.
+# Modelado sobre el patrón del laboratorio EA2 del docente
+# (backend S3 para tfstate + Docker Hub como registro, sin ECR;
+# la contraseña de RDS se genera dentro de Terraform, sin secret).
+#   1. build-push : imágenes frontend/backend → Docker Hub
+#   2. terraform  : VPC + SGs por capa + ALB + ASG(2/2/4) + RDS Multi-AZ,
+#                   y carga de init.sql en RDS vía SSM (sin SSH)
+# Secrets: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN,
+#          DOCKER_USERNAME / DOCKER_PASSWORD
+# Variables de repo: EA2_S3_BUCKET (bucket del tfstate)
+# ─────────────────────────────────────────────────────────────
+
+name: EFT - Migracion Automovil Tech (Terraform + Docker Hub)
+
+on:
+  workflow_dispatch:
+    inputs:
+      aws_region:
+        description: Región AWS
+        required: true
+        type: string
+        default: us-east-1
+      instance_type:
+        description: Tipo EC2 de los nodos del ASG
+        required: true
+        type: string
+        default: t3.micro
+      vpc_octet:
+        description: Octeto X en 10.X.0.0/16 (1-254)
+        required: true
+        type: string
+        default: "50"
+
+env:
+  TF_DIR: infra/eft-cloud-lab
+
+jobs:
+  build-push:
+    name: Build y push a Docker Hub
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Login Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: Build y push backend
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/tienda-vehiculos-backend:latest app/tienda-vehiculos-backend
+          docker push ${{ secrets.DOCKER_USERNAME }}/tienda-vehiculos-backend:latest
+
+      - name: Build y push frontend
+        run: |
+          docker build -t ${{ secrets.DOCKER_USERNAME }}/tienda-vehiculos-frontend:latest app/tienda-vehiculos-frontend
+          docker push ${{ secrets.DOCKER_USERNAME }}/tienda-vehiculos-frontend:latest
+
+  terraform:
+    name: Provisionar infraestructura y poblar RDS
+    needs: build-push
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Credenciales AWS
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-region: ${{ inputs.aws_region }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.9.0
+          terraform_wrapper: false
+
+      - name: Terraform init (backend S3)
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform init \
+            -backend-config="bucket=${{ vars.EA2_S3_BUCKET }}" \
+            -backend-config="key=eft/terraform.tfstate" \
+            -backend-config="region=${{ inputs.aws_region }}" \
+            -backend-config="encrypt=true"
+
+      - name: Terraform apply
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          terraform apply -auto-approve \
+            -var="aws_region=${{ inputs.aws_region }}" \
+            -var="instance_type=${{ inputs.instance_type }}" \
+            -var="vpc_octet=${{ inputs.vpc_octet }}" \
+            -var="dockerhub_username=${{ secrets.DOCKER_USERNAME }}"
+
+      - name: Leer outputs (enmascara la contraseña generada)
+        id: tf-out
+        working-directory: ${{ env.TF_DIR }}
+        run: |
+          DB_PASS=$(terraform output -raw db_password)
+          echo "::add-mask::$DB_PASS"
+          {
+            echo "alb_dns=$(terraform output -raw alb_dns)"
+            echo "rds_endpoint=$(terraform output -raw rds_endpoint)"
+            echo "asg_name=$(terraform output -raw asg_name)"
+            echo "db_pass=$DB_PASS"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Esperar instancia del ASG registrada en SSM
+        id: instance
+        run: |
+          for i in $(seq 1 60); do
+            ID=$(aws autoscaling describe-auto-scaling-groups \
+              --auto-scaling-group-names "${{ steps.tf-out.outputs.asg_name }}" \
+              --query 'AutoScalingGroups[0].Instances[?LifecycleState==`InService`].InstanceId' \
+              --output text | awk '{print $1}')
+            if [ -n "$ID" ] && [ "$ID" != "None" ]; then
+              ONLINE=$(aws ssm describe-instance-information \
+                --filters "Key=InstanceIds,Values=$ID" \
+                --query 'InstanceInformationList[0].PingStatus' --output text 2>/dev/null || true)
+              [ "$ONLINE" = "Online" ] && { echo "id=$ID" >> "$GITHUB_OUTPUT"; exit 0; }
+            fi
+            echo "Esperando instancia SSM Online... intento $i/60"; sleep 15
+          done
+          echo "No hay instancia disponible en SSM" >&2; exit 1
+
+      - name: Ejecutar init.sql contra RDS (vía SSM)
+        run: |
+          CMD_ID=$(aws ssm send-command \
+            --instance-ids "${{ steps.instance.outputs.id }}" \
+            --document-name "AWS-RunShellScript" \
+            --comment "EFT: poblar tienda_vehiculos en RDS" \
+            --parameters commands="[
+              \"curl -fsSL https://raw.githubusercontent.com/${{ github.repository }}/main/app/tienda-vehiculos-db/init.sql -o /tmp/init.sql\",
+              \"mysql -h ${{ steps.tf-out.outputs.rds_endpoint }} -u admin -p'${{ steps.tf-out.outputs.db_pass }}' < /tmp/init.sql\",
+              \"mysql -h ${{ steps.tf-out.outputs.rds_endpoint }} -u admin -p'${{ steps.tf-out.outputs.db_pass }}' -e 'USE tienda_vehiculos; SELECT COUNT(*) AS vehiculos FROM vehiculos;'\"
+            ]" \
+            --query 'Command.CommandId' --output text)
+          aws ssm wait command-executed --command-id "$CMD_ID" \
+            --instance-id "${{ steps.instance.outputs.id }}"
+          aws ssm get-command-invocation --command-id "$CMD_ID" \
+            --instance-id "${{ steps.instance.outputs.id }}" \
+            --query 'StandardOutputContent' --output text
+
+      - name: Resumen
+        run: |
+          {
+            echo "## EFT · Infraestructura desplegada"
+            echo "- Frontend: http://${{ steps.tf-out.outputs.alb_dns }}"
+            echo "- API: http://${{ steps.tf-out.outputs.alb_dns }}:3001/api/vehiculos"
+            echo "- RDS: ${{ steps.tf-out.outputs.rds_endpoint }}"
+            echo "- ASG: ${{ steps.tf-out.outputs.asg_name }}"
+            echo "- Contraseña RDS: generada por Terraform (recuperar con 'terraform output -raw db_password')"
+          } >> "$GITHUB_STEP_SUMMARY"
