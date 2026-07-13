@@ -19,7 +19,7 @@ data "aws_ami" "al2023" {
 }
 
 resource "aws_launch_template" "app" {
-  name_prefix   = "${var.app_name}-lt-"
+  name_prefix   = "${local.prefix}-lt-"
   image_id      = data.aws_ami.al2023.id
   instance_type = var.instance_type
 
@@ -49,12 +49,12 @@ resource "aws_launch_template" "app" {
 
   tag_specifications {
     resource_type = "instance"
-    tags          = { Name = "${var.app_name}-asg-node" }
+    tags          = { Name = "${local.prefix}-asg-node" }
   }
 }
 
 resource "aws_autoscaling_group" "app" {
-  name                = "${var.app_name}-asg"
+  name                = "${local.prefix}-asg"
   min_size            = var.asg_min_size
   desired_capacity    = var.asg_desired_capacity
   max_size            = var.asg_max_size
@@ -75,14 +75,14 @@ resource "aws_autoscaling_group" "app" {
 
   tag {
     key                 = "Name"
-    value               = "${var.app_name}-asg-node"
+    value               = "${local.prefix}-asg-node"
     propagate_at_launch = true
   }
 }
 
 # Escalamiento por CPU al 70% (coherente con las alarmas de la pauta 1.4).
 resource "aws_autoscaling_policy" "cpu_target" {
-  name                   = "${var.app_name}-cpu-70"
+  name                   = "${local.prefix}-cpu-70"
   autoscaling_group_name = aws_autoscaling_group.app.name
   policy_type            = "TargetTrackingScaling"
 

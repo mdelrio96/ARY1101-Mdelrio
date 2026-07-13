@@ -8,6 +8,8 @@ data "aws_availability_zones" "available" {
 locals {
   vpc_cidr = "10.${var.vpc_octet}.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 2)
+  # Prefijo con el identificador del propietario: tienda-vehiculos-mdelrio-*
+  prefix = "${var.app_name}-${var.owner}"
 }
 
 resource "aws_vpc" "main" {
@@ -15,12 +17,12 @@ resource "aws_vpc" "main" {
   enable_dns_support   = true
   enable_dns_hostnames = true
 
-  tags = { Name = "${var.app_name}-vpc" }
+  tags = { Name = "${local.prefix}-vpc" }
 }
 
 resource "aws_internet_gateway" "main" {
   vpc_id = aws_vpc.main.id
-  tags   = { Name = "${var.app_name}-igw" }
+  tags   = { Name = "${local.prefix}-igw" }
 }
 
 resource "aws_subnet" "public" {
@@ -30,7 +32,7 @@ resource "aws_subnet" "public" {
   availability_zone       = local.azs[count.index]
   map_public_ip_on_launch = true
 
-  tags = { Name = "${var.app_name}-public-${local.azs[count.index]}" }
+  tags = { Name = "${local.prefix}-public-${local.azs[count.index]}" }
 }
 
 resource "aws_subnet" "private" {
@@ -39,7 +41,7 @@ resource "aws_subnet" "private" {
   cidr_block        = "10.${var.vpc_octet}.${count.index + 11}.0/24"
   availability_zone = local.azs[count.index]
 
-  tags = { Name = "${var.app_name}-private-${local.azs[count.index]}" }
+  tags = { Name = "${local.prefix}-private-${local.azs[count.index]}" }
 }
 
 resource "aws_route_table" "public" {
@@ -50,7 +52,7 @@ resource "aws_route_table" "public" {
     gateway_id = aws_internet_gateway.main.id
   }
 
-  tags = { Name = "${var.app_name}-rt-public" }
+  tags = { Name = "${local.prefix}-rt-public" }
 }
 
 resource "aws_route_table_association" "public" {

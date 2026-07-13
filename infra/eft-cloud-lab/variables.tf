@@ -68,3 +68,9 @@ variable "app_name" {
   type        = string
   default     = "tienda-vehiculos"
 }
+
+variable "owner" {
+  description = "Identificador del propietario, incluido en el nombre de cada recurso"
+  type        = string
+  default     = "mdelrio"
+}

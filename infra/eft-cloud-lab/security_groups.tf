@@ -2,7 +2,7 @@
 # Sin puerto 22: el acceso administrativo a las EC2 es vía SSM.
 
 resource "aws_security_group" "alb" {
-  name        = "${var.app_name}-sg-alb"
+  name        = "${local.prefix}-sg-alb"
   description = "Capa balanceador: HTTP publico hacia el ALB"
   vpc_id      = aws_vpc.main.id
 
@@ -29,11 +29,11 @@ resource "aws_security_group" "alb" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = { Name = "${var.app_name}-sg-alb" }
+  tags = { Name = "${local.prefix}-sg-alb" }
 }
 
 resource "aws_security_group" "web" {
-  name        = "${var.app_name}-sg-web"
+  name        = "${local.prefix}-sg-web"
   description = "Capa aplicacion: trafico solo desde el ALB"
   vpc_id      = aws_vpc.main.id
 
@@ -60,11 +60,11 @@ resource "aws_security_group" "web" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = { Name = "${var.app_name}-sg-web" }
+  tags = { Name = "${local.prefix}-sg-web" }
 }
 
 resource "aws_security_group" "db" {
-  name        = "${var.app_name}-sg-db"
+  name        = "${local.prefix}-sg-db"
   description = "Capa datos: MySQL solo desde la capa aplicacion"
   vpc_id      = aws_vpc.main.id
 
@@ -83,5 +83,5 @@ resource "aws_security_group" "db" {
     cidr_blocks = ["0.0.0.0/0"]
   }
 
-  tags = { Name = "${var.app_name}-sg-db" }
+  tags = { Name = "${local.prefix}-sg-db" }
 }

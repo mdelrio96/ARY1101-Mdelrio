@@ -10,14 +10,14 @@ resource "random_password" "db_master" {
 }
 
 resource "aws_db_subnet_group" "main" {
-  name       = "${var.app_name}-db-subnets"
+  name       = "${local.prefix}-db-subnets"
   subnet_ids = aws_subnet.private[*].id
 
-  tags = { Name = "${var.app_name}-db-subnets" }
+  tags = { Name = "${local.prefix}-db-subnets" }
 }
 
 resource "aws_db_instance" "main" {
-  identifier     = "${var.app_name}-db"
+  identifier     = "${local.prefix}-db"
   engine         = "mysql"
   engine_version = "8.0"
   instance_class = var.db_instance_class
@@ -40,5 +40,5 @@ resource "aws_db_instance" "main" {
   skip_final_snapshot = true
   apply_immediately   = true
 
-  tags = { Name = "${var.app_name}-db" }
+  tags = { Name = "${local.prefix}-db" }
 }
