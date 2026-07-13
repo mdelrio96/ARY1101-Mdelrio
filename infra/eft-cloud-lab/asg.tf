@@ -41,7 +41,7 @@ resource "aws_launch_template" "app" {
   user_data = base64encode(templatefile("${path.module}/config/user_data.sh.tpl", {
     dockerhub_username = var.dockerhub_username
     image_tag          = var.image_tag
-    db_host            = aws_db_instance.main.address
+    db_host            = aws_db_instance.primary.address
     db_user            = var.db_username
     db_password        = random_password.db_master.result
     db_name            = "tienda_vehiculos"

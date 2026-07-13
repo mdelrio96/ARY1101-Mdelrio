@@ -40,12 +40,6 @@ variable "db_instance_class" {
   default     = "db.t3.micro"
 }
 
-variable "db_multi_az" {
-  description = "Habilita Multi-AZ en RDS (pauta EFT); desactivable si el Learner Lab lo rechaza"
-  type        = bool
-  default     = true
-}
-
 variable "db_username" {
   description = "Usuario administrador de RDS"
   type        = string

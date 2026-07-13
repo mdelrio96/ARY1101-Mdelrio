@@ -4,8 +4,13 @@ output "alb_dns" {
 }
 
 output "rds_endpoint" {
-  description = "Endpoint de RDS MySQL"
-  value       = aws_db_instance.main.address
+  description = "Endpoint de la instancia RDS primaria (escrituras)"
+  value       = aws_db_instance.primary.address
+}
+
+output "rds_replica_endpoint" {
+  description = "Endpoint de la réplica de lectura de RDS"
+  value       = aws_db_instance.replica.address
 }
 
 output "asg_name" {

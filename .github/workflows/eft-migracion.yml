@@ -4,7 +4,7 @@
 # (backend S3 para tfstate + Docker Hub como registro, sin ECR;
 # la contraseña de RDS se genera dentro de Terraform, sin secret).
 #   1. build-push : imágenes frontend/backend → Docker Hub
-#   2. terraform  : VPC + SGs por capa + ALB + ASG(2/2/4) + RDS Multi-AZ,
+#   2. terraform  : VPC + SGs por capa + ALB + ASG(2/2/4) + RDS primaria/réplica,
 #                   y carga de init.sql en RDS vía SSM (sin SSH)
 # Secrets: AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY / AWS_SESSION_TOKEN,
 #          DOCKER_USERNAME / DOCKER_PASSWORD
