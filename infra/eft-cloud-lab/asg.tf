@@ -45,6 +45,7 @@ resource "aws_launch_template" "app" {
     db_user            = var.db_username
     db_password        = random_password.db_master.result
     db_name            = "tienda_vehiculos"
+    node_name_prefix   = "${local.prefix}-node"
   }))
 
   tag_specifications {

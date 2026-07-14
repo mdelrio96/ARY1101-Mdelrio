@@ -3,6 +3,18 @@
 # desde Docker Hub (imágenes públicas del alumno; no requiere ECR).
 set -xe
 
+# Auto-nombrado: cada nodo sobreescribe su tag Name con un sufijo único
+# (su propio instance ID), ya que el ASG propaga el mismo Name a todos.
+TOKEN=$(curl -sX PUT "http://169.254.169.254/latest/api/token" \
+  -H "X-aws-ec2-metadata-token-ttl-seconds: 300")
+INSTANCE_ID=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/instance-id)
+REGION=$(curl -s -H "X-aws-ec2-metadata-token: $TOKEN" \
+  http://169.254.169.254/latest/meta-data/placement/region)
+SUFFIX=$${INSTANCE_ID#i-}
+aws ec2 create-tags --region "$REGION" --resources "$INSTANCE_ID" \
+  --tags "Key=Name,Value=${node_name_prefix}-$${SUFFIX: -4}" || true
+
 dnf install -y docker mariadb105
 systemctl enable --now docker
 
